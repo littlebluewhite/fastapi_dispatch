@@ -1,91 +1,87 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+
+from dependencies.common_search_dependencies import CommonQuery
 from dependencies.db_dependencies import get_db
-from dispatch_SQL import crud
 from dispatch_data import template_data
-from dispatch_function.reload_function import initial_reload_data_from_sql
-from dispatch_redis import operate
+from dispatch_function import general_operate
 from dispatch_schemas import template_schemas
 
 router = APIRouter(
     prefix="/dispatch_template",
-    tags=["template"],
+    tags=["template", "Table CRUD API"],
     dependencies=[]
 )
 
-redis_tables = template_data.redis_tables
-sql_model_name = template_data.sql_model_name
-schemas_model_name = template_data.schemas_model_name
+template_operate = general_operate.GeneralOperate(template_data)
 
 
 @router.on_event("startup")
 async def template_startup_event():
-    initial_reload_data_from_sql(redis_tables, sql_model_name, schemas_model_name)
+    template_operate.initial_redis_data()
 
 
-@router.post("/", response_model=template_schemas.DispatchTemplate)
-async def sql_create_dispatch_template(template: template_schemas.DispatchTemplateCreate,
-                                       db: Session = Depends(get_db)):
-    return crud.create_sql_data(db, template, sql_model_name)
-
-
-@router.get("/", response_model=list[template_schemas.DispatchTemplate])
+@router.get("/", response_model=list[template_operate.main_schemas])
 async def sql_read_all_dispatch_template(db: Session = Depends(get_db)):
-    return crud.get_all_sql_data(db, sql_model_name)
+    return template_operate.read_all_data_from_sql(db)
 
 
-@router.get("/{template_id}", response_model=template_schemas.DispatchTemplate)
+@router.get("/{template_id}", response_model=template_operate.main_schemas)
 async def sql_read_dispatch_template(template_id: int, db: Session = Depends(get_db)):
-    return crud.get_sql_data(db, template_id, sql_model_name)
+    return template_operate.read_data_from_sql_by_id_set(db, {template_id})[0]
 
 
-@router.patch("/{template_id}", response_model=template_schemas.DispatchTemplate)
-async def sql_update_dispatch_template(update_model: template_schemas.DispatchTemplateUpdate,
-                                       template_id: int, db: Session = Depends(get_db)):
-    return crud.update_sql_data(db, update_model, template_id, sql_model_name)
+@router.get("/api/multiple/", response_model=list[template_operate.main_schemas])
+async def get_multiple_dispatch_template(common: CommonQuery = Depends(),
+                                         db: Session = Depends(get_db)):
+    if common.pattern == "all":
+        return template_operate.read_all_data_from_redis()[common.skip:][:common.limit]
+    else:
+        id_set = template_operate.execute_sql_where_command(db, common.where_command)
+        return template_operate.read_data_from_redis_by_key_set(id_set)[common.skip:][:common.limit]
 
 
-@router.delete("/{template_id}")
-async def sql_delete_dispatch_template(template_id: int, db: Session = Depends(get_db)):
-    return crud.delete_sql_data(db, template_id, sql_model_name)
-
-
-@router.get("/api/", response_model=list[template_schemas.DispatchTemplate],
-            tags=["Table CURD API"])
-async def get_all_dispatch_template():
-    return operate.read_redis_all_data(redis_tables[0]["name"])
-
-
-@router.get("/api/{template_id}", response_model=template_schemas.DispatchTemplate,
-            tags=["Table CURD API"])
+@router.get("/api/{template_id}", response_model=template_operate.main_schemas)
 async def get_dispatch_template_by_id(template_id):
-    return operate.read_redis_data(redis_tables[0]["name"], template_id)
+    return template_operate.read_data_from_redis_by_key_set({template_id})[0]
 
 
-@router.post("/api/", response_model=template_schemas.DispatchTemplate,
-             tags=["Table CURD API"])
-async def create_dispatch_template(template: template_schemas.DispatchTemplateCreate, db: Session = Depends(get_db)):
-    result = crud.create_sql_data(db, template, sql_model_name)
-    for table in redis_tables:
-        operate.write_sql_data_to_redis(table["name"], [result], schemas_model_name, table["key"])
-    return result
+@router.post("/api/", response_model=template_operate.main_schemas)
+async def create_dispatch_template(template: template_schemas.DispatchTemplateCreate,
+                                   db: Session = Depends(get_db)):
+    with db.begin():
+        return template_operate.create_data(db, [template])[0]
 
 
-@router.patch("/api/{template_id}", response_model=template_schemas.DispatchTemplate,
-              tags=["Table CURD API"])
-async def update_dispatch_template(update_model: template_schemas.DispatchTemplateUpdate,
+@router.post("/api/multiple/", response_model=list[template_operate.main_schemas])
+async def create_multiple_dispatch_template(
+        template_list: list[template_schemas.DispatchTemplateCreate], db: Session = Depends(get_db)):
+    with db.begin():
+        return template_operate.create_data(db, template_list)
+
+
+@router.patch("/api/{template_id}", response_model=template_operate.main_schemas)
+async def update_dispatch_template(update_data: template_schemas.DispatchTemplateUpdate,
                                    template_id: int, db: Session = Depends(get_db)):
-    result = crud.update_sql_data(db, update_model, template_id, sql_model_name)
-    for table in redis_tables:
-        operate.write_sql_data_to_redis(table["name"], [result], schemas_model_name, table["key"])
-    return result
+    with db.begin():
+        update_list = [template_operate.add_id_in_update_data(update_data, template_id)]
+        return template_operate.update_data(db, update_list)[0]
 
 
-@router.delete("/api/{template_id}",
-               tags=["Table CURD API"])
+@router.patch("/api/multiple/", response_model=list[template_operate.main_schemas])
+async def update_multiple_dispatch_template(
+        update_list: list[template_schemas.DispatchTemplateMultipleUpdate], db: Session = Depends(get_db)):
+    with db.begin():
+        return template_operate.update_data(db, update_list)
+
+
+@router.delete("/api/{template_id}")
 async def delete_dispatch_template(template_id: int, db: Session = Depends(get_db)):
-    delete_datum = crud.delete_sql_data(db, template_id, sql_model_name)
-    for table in redis_tables:
-        operate.delete_redis_data(table["name"], [delete_datum], schemas_model_name,
-                                  table["key"])
-    return "Ok"
+    with db.begin():
+        return template_operate.delete_data(db, {template_id})
+
+
+@router.delete("/api/multiple/")
+async def delete_dispatch_template(id_set: set[int], db: Session = Depends(get_db)):
+    with db.begin():
+        return template_operate.delete_data(db, id_set)

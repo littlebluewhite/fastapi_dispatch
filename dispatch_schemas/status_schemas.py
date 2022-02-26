@@ -22,3 +22,7 @@ class DispatchStatusCreate(DispatchStatusBase):
 class DispatchStatusUpdate(DispatchStatusBase):
     name: Optional[str] = None
     description: Optional[str] = None
+
+
+class DispatchStatusMultipleUpdate(DispatchStatusUpdate):
+    id: int

@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DispatchTemplateBase(BaseModel):
@@ -26,7 +26,9 @@ class DispatchTemplate(DispatchTemplateBase):
 
 
 class DispatchTemplateCreate(DispatchTemplateBase):
-    pass
+    level_id: Optional[int] = 1
+    people_limit: Optional[int] = Field(1, ge=1)
+    ack_method_id: Optional[int] = 1
 
 
 class DispatchTemplateUpdate(DispatchTemplateBase):
@@ -40,3 +42,7 @@ class DispatchTemplateUpdate(DispatchTemplateBase):
     people_limit: Optional[int] = None
     time_limit: Optional[datetime.timedelta] = None
     ack_method_id: Optional[int] = None
+
+
+class DispatchTemplateMultipleUpdate(DispatchTemplateUpdate):
+    id: int

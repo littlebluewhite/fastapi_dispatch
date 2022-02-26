@@ -1,7 +1,7 @@
 import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dispatch_schemas.confirm_schemas import DispatchConfirm
 from dispatch_schemas.reply_schemas import DispatchReply
@@ -40,7 +40,10 @@ class DispatchTask(DispatchTaskBase):
 
 
 class DispatchTaskCreate(DispatchTaskBase):
-    pass
+    level_id: Optional[int] = 1
+    people_limit: Optional[int] = Field(1, ge=1)
+    ack_method_id: Optional[int] = 1
+    status_id: Optional[int] = 1
 
 
 class DispatchTaskUpdate(DispatchTaskBase):
@@ -58,3 +61,11 @@ class DispatchTaskUpdate(DispatchTaskBase):
     ack_method_id: Optional[int] = None
     status_id: Optional[int] = None
     end_time: Optional[datetime.datetime] = None
+
+
+class DispatchTaskWrite(DispatchTaskCreate):
+    dispatch_event_id: str
+
+
+class DispatchTaskMultipleUpdate(DispatchTaskUpdate):
+    id: int

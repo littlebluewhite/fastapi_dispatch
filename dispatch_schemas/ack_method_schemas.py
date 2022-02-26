@@ -28,3 +28,7 @@ class DispatchAckMethodUpdate(DispatchAckMethodBase):
     need_text: Optional[bool] = None
     need_photo: Optional[bool] = None
     need_video: Optional[bool] = None
+
+
+class DispatchAckMethodMultipleUpdate(DispatchAckMethodUpdate):
+    id: int

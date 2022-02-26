@@ -1,90 +1,86 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+
+from dependencies.common_search_dependencies import CommonQuery
 from dependencies.db_dependencies import get_db
-from dispatch_SQL import crud
 from dispatch_data import status_data
-from dispatch_function.reload_function import initial_reload_data_from_sql
-from dispatch_redis import operate
+from dispatch_function import general_operate
 from dispatch_schemas import status_schemas
 
 router = APIRouter(
     prefix="/dispatch_status",
-    tags=["status"],
+    tags=["status", "Table CRUD API"],
     dependencies=[]
 )
 
-redis_tables = status_data.redis_tables
-sql_model_name = status_data.sql_model_name
-schemas_model_name = status_data.schemas_model_name
+status_operate = general_operate.GeneralOperate(status_data)
 
 
 @router.on_event("startup")
 async def status_startup_event():
-    initial_reload_data_from_sql(redis_tables, sql_model_name, schemas_model_name)
+    status_operate.initial_redis_data()
 
 
-@router.post("/", response_model=status_schemas.DispatchStatus)
-async def sql_create_dispatch_status(status: status_schemas.DispatchStatusCreate, db: Session = Depends(get_db)):
-    return crud.create_sql_data(db, status, sql_model_name)
-
-
-@router.get("/", response_model=list[status_schemas.DispatchStatus])
+@router.get("/", response_model=list[status_operate.main_schemas])
 async def sql_read_all_dispatch_status(db: Session = Depends(get_db)):
-    return crud.get_all_sql_data(db, sql_model_name)
+    return status_operate.read_all_data_from_sql(db)
 
 
-@router.get("/{status_id}", response_model=status_schemas.DispatchStatus)
+@router.get("/{status_id}", response_model=status_operate.main_schemas)
 async def sql_read_dispatch_status(status_id: int, db: Session = Depends(get_db)):
-    return crud.get_sql_data(db, status_id, sql_model_name)
+    return status_operate.read_data_from_sql_by_id_set(db, {status_id})[0]
 
 
-@router.patch("/{status_id}", response_model=status_schemas.DispatchStatus)
-async def sql_update_dispatch_status(update_model: status_schemas.DispatchStatusUpdate,
-                                     status_id: int, db: Session = Depends(get_db)):
-    return crud.update_sql_data(db, update_model, status_id, sql_model_name)
+@router.get("/api/multiple/", response_model=list[status_operate.main_schemas])
+async def get_multiple_dispatch_status(common: CommonQuery = Depends(),
+                                       db: Session = Depends(get_db)):
+    if common.pattern == "all":
+        return status_operate.read_all_data_from_redis()[common.skip:][:common.limit]
+    else:
+        id_set = status_operate.execute_sql_where_command(db, common.where_command)
+        return status_operate.read_data_from_redis_by_key_set(id_set)[common.skip:][:common.limit]
 
 
-@router.delete("/{status_id}")
-async def sql_delete_dispatch_status(status_id: int, db: Session = Depends(get_db)):
-    return crud.delete_sql_data(db, status_id, sql_model_name)
-
-
-@router.get("/api/", response_model=list[status_schemas.DispatchStatus],
-            tags=["Table CURD API"])
-async def get_all_dispatch_status():
-    return operate.read_redis_all_data(redis_tables[0]["name"])
-
-
-@router.get("/api/{status_id}", response_model=status_schemas.DispatchStatus,
-            tags=["Table CURD API"])
+@router.get("/api/{status_id}", response_model=status_operate.main_schemas)
 async def get_dispatch_status_by_id(status_id):
-    return operate.read_redis_data(redis_tables[0]["name"], status_id)
+    return status_operate.read_data_from_redis_by_key_set({status_id})[0]
 
 
-@router.post("/api/", response_model=status_schemas.DispatchStatus,
-             tags=["Table CURD API"])
+@router.post("/api/", response_model=status_operate.main_schemas)
 async def create_dispatch_status(status: status_schemas.DispatchStatusCreate, db: Session = Depends(get_db)):
-    result = crud.create_sql_data(db, status, sql_model_name)
-    for table in redis_tables:
-        operate.write_sql_data_to_redis(table["name"], [result], schemas_model_name, table["key"])
-    return result
+    with db.begin():
+        return status_operate.create_data(db, [status])[0]
 
 
-@router.patch("/api/{status_id}", response_model=status_schemas.DispatchStatus,
-              tags=["Table CURD API"])
-async def update_dispatch_status(update_model: status_schemas.DispatchStatusUpdate,
+@router.post("/api/multiple/", response_model=list[status_operate.main_schemas])
+async def create_multiple_dispatch_status(
+        status_list: list[status_schemas.DispatchStatusCreate], db: Session = Depends(get_db)):
+    with db.begin():
+        return status_operate.create_data(db, status_list)
+
+
+@router.patch("/api/{status_id}", response_model=status_operate.main_schemas)
+async def update_dispatch_status(update_data: status_schemas.DispatchStatusUpdate,
                                  status_id: int, db: Session = Depends(get_db)):
-    result = crud.update_sql_data(db, update_model, status_id, sql_model_name)
-    for table in redis_tables:
-        operate.write_sql_data_to_redis(table["name"], [result], schemas_model_name, table["key"])
-    return result
+    with db.begin():
+        update_list = [status_operate.add_id_in_update_data(update_data, status_id)]
+        return status_operate.update_data(db, update_list)[0]
 
 
-@router.delete("/api/{status_id}",
-               tags=["Table CURD API"])
+@router.patch("/api/multiple/", response_model=list[status_operate.main_schemas])
+async def update_multiple_dispatch_status(
+        update_list: list[status_schemas.DispatchStatusMultipleUpdate], db: Session = Depends(get_db)):
+    with db.begin():
+        return status_operate.update_data(db, update_list)
+
+
+@router.delete("/api/{status_id}")
 async def delete_dispatch_status(status_id: int, db: Session = Depends(get_db)):
-    delete_datum = crud.delete_sql_data(db, status_id, sql_model_name)
-    for table in redis_tables:
-        operate.delete_redis_data(table["name"], [delete_datum], schemas_model_name,
-                                  table["key"])
-    return "Ok"
+    with db.begin():
+        return status_operate.delete_data(db, {status_id})
+
+
+@router.delete("/api/multiple/")
+async def delete_dispatch_status(id_set: set[int], db: Session = Depends(get_db)):
+    with db.begin():
+        return status_operate.delete_data(db, id_set)

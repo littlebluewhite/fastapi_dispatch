@@ -24,3 +24,7 @@ class DispatchLevelUpdate(DispatchLevelBase):
     name: Optional[str] = None
     description: Optional[str] = None
     color_code: Optional[list] = None
+
+
+class DispatchLevelMultipleUpdate(DispatchLevelUpdate):
+    id: int

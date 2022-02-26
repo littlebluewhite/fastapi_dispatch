@@ -1,90 +1,86 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+
+from dependencies.common_search_dependencies import CommonQuery
 from dependencies.db_dependencies import get_db
-from dispatch_SQL import crud
 from dispatch_data import reply_data
-from dispatch_function import reply_function
-from dispatch_function.reload_function import initial_reload_data_from_sql, reload_redis_task_from_sql
-from dispatch_redis import operate
+from dispatch_function import general_operate
 from dispatch_schemas import reply_schemas
 
 router = APIRouter(
     prefix="/dispatch_reply",
-    tags=["reply"],
+    tags=["reply", "Table CRUD API"],
     dependencies=[]
 )
 
-redis_tables = reply_data.redis_tables
-sql_model_name = reply_data.sql_model_name
-schemas_model_name = reply_data.schemas_model_name
+reply_operate = general_operate.GeneralOperate(reply_data)
 
 
 @router.on_event("startup")
 async def reply_startup_event():
-    initial_reload_data_from_sql(redis_tables, sql_model_name, schemas_model_name)
+    reply_operate.initial_redis_data()
 
 
-@router.post("/", response_model=reply_schemas.DispatchReply)
-async def sql_create_dispatch_reply(reply: reply_schemas.DispatchReplyCreate, db: Session = Depends(get_db)):
-    return crud.create_sql_data(db, reply, sql_model_name)
-
-
-@router.get("/", response_model=list[reply_schemas.DispatchReply])
+@router.get("/", response_model=list[reply_operate.main_schemas])
 async def sql_read_all_dispatch_reply(db: Session = Depends(get_db)):
-    return crud.get_all_sql_data(db, sql_model_name)
+    return reply_operate.read_all_data_from_sql(db)
 
 
-@router.get("/{reply_id}", response_model=reply_schemas.DispatchReply)
+@router.get("/{reply_id}", response_model=reply_operate.main_schemas)
 async def sql_read_dispatch_reply(reply_id: int, db: Session = Depends(get_db)):
-    return crud.get_sql_data(db, reply_id, sql_model_name)
+    return reply_operate.read_data_from_sql_by_id_set(db, {reply_id})[0]
 
 
-@router.patch("/{reply_id}", response_model=reply_schemas.DispatchReply)
-async def sql_update_dispatch_reply(update_data: reply_schemas.DispatchReplyUpdate,
-                                    reply_id: int, db: Session = Depends(get_db)):
-    return crud.update_sql_data(db, update_data, reply_id, sql_model_name)
+@router.get("/api/multiple/", response_model=list[reply_operate.main_schemas])
+async def get_multiple_dispatch_reply(common: CommonQuery = Depends(),
+                                      db: Session = Depends(get_db)):
+    if common.pattern == "all":
+        return reply_operate.read_all_data_from_redis()[common.skip:][:common.limit]
+    else:
+        id_set = reply_operate.execute_sql_where_command(db, common.where_command)
+        return reply_operate.read_data_from_redis_by_key_set(id_set)[common.skip:][:common.limit]
 
 
-@router.delete("/{reply_id}")
-async def sql_delete_dispatch_reply(reply_id: int, db: Session = Depends(get_db)):
-    return crud.delete_sql_data(db, reply_id, sql_model_name)
-
-
-@router.get("/api/", response_model=list[reply_schemas.DispatchReply],
-            tags=["Table CURD API"])
-async def get_all_dispatch_reply():
-    return operate.read_redis_all_data(redis_tables[0]["name"])
-
-
-@router.get("/api/{reply_id}", response_model=reply_schemas.DispatchReply,
-            tags=["Table CURD API"])
+@router.get("/api/{reply_id}", response_model=reply_operate.main_schemas)
 async def get_dispatch_reply_by_id(reply_id):
-    return operate.read_redis_data(redis_tables[0]["name"], reply_id)
+    return reply_operate.read_data_from_redis_by_key_set({reply_id})[0]
 
 
-@router.post("/api/", response_model=reply_schemas.DispatchReply,
-             tags=["Table CURD API"])
-async def create_dispatch_reply(reply_create: reply_schemas.DispatchReplyCreate, db: Session = Depends(get_db)):
-    return reply_function.create_reply(reply_create, db)
+@router.post("/api/", response_model=reply_operate.main_schemas)
+async def create_dispatch_reply(reply: reply_schemas.DispatchReplyCreate, db: Session = Depends(get_db)):
+    with db.begin():
+        return reply_operate.create_data(db, [reply])[0]
 
 
-@router.patch("/api/{reply_id}", response_model=reply_schemas.DispatchReply,
-              tags=["Table CURD API"])
-async def update_dispatch_reply(update_model: reply_schemas.DispatchReplyUpdate,
+@router.post("/api/multiple/", response_model=list[reply_operate.main_schemas])
+async def create_multiple_dispatch_reply(
+        reply_list: list[reply_schemas.DispatchReplyCreate], db: Session = Depends(get_db)):
+    with db.begin():
+        return reply_operate.create_data(db, reply_list)
+
+
+@router.patch("/api/{reply_id}", response_model=reply_operate.main_schemas)
+async def update_dispatch_reply(update_data: reply_schemas.DispatchReplyUpdate,
                                 reply_id: int, db: Session = Depends(get_db)):
-    result = crud.update_sql_data(db, update_model, reply_id, sql_model_name)
-    reload_redis_task_from_sql(db, result.dispatch_task_id)
-    for table in redis_tables:
-        operate.write_sql_data_to_redis(table["name"], [result], schemas_model_name, table["key"])
-    return result
+    with db.begin():
+        update_list = [reply_operate.add_id_in_update_data(update_data, reply_id)]
+        return reply_operate.update_data(db, update_list)[0]
 
 
-@router.delete("/api/{reply_id}",
-               tags=["Table CURD API"])
+@router.patch("/api/multiple/", response_model=list[reply_operate.main_schemas])
+async def update_multiple_dispatch_reply(
+        update_list: list[reply_schemas.DispatchReplyMultipleUpdate], db: Session = Depends(get_db)):
+    with db.begin():
+        return reply_operate.update_data(db, update_list)
+
+
+@router.delete("/api/{reply_id}")
 async def delete_dispatch_reply(reply_id: int, db: Session = Depends(get_db)):
-    delete_datum = crud.delete_sql_data(db, reply_id, sql_model_name)
-    reload_redis_task_from_sql(db, delete_datum.dispatch_task_id)
-    for table in redis_tables:
-        operate.delete_redis_data(table["name"], [delete_datum], schemas_model_name,
-                                  table["key"])
-    return "Ok"
+    with db.begin():
+        return reply_operate.delete_data(db, {reply_id})
+
+
+@router.delete("/api/multiple/")
+async def delete_dispatch_reply(id_set: set[int], db: Session = Depends(get_db)):
+    with db.begin():
+        return reply_operate.delete_data(db, id_set)

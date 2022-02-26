@@ -29,3 +29,7 @@ class DispatchConfirmUpdate(DispatchConfirmBase):
     dispatch_task_id: Optional[int] = None
     provider_name: Optional[str] = None
     status: Optional[ReplyConfirmStatus] = None
+
+
+class DispatchConfirmMultipleUpdate(DispatchConfirmUpdate):
+    id: int

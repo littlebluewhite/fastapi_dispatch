@@ -1,7 +1,7 @@
 import datetime
 
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, JSON, Interval, DateTime, Enum, \
-    Text, LargeBinary
+    Text
 from sqlalchemy.orm import relationship
 from dispatch_SQL.database import Base
 from dispatch_data.enum_data import ReplyConfirmStatus, ReplyFileType
@@ -62,7 +62,8 @@ class DispatchReplyFile(Base):
     filename = Column(String(64))
     file_type = Column(Enum(ReplyFileType))
     content_type = Column(String(64))
-    data = Column(LargeBinary(length=(2**32)-1))
+    # data = Column(LargeBinary(length=(2**32)-1))
+    path = Column(String(1024))
 
     reply = relationship("DispatchReply", back_populates="file")
 

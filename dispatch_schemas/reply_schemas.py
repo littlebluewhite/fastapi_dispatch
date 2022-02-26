@@ -32,3 +32,7 @@ class DispatchReplyUpdate(DispatchReplyBase):
     dispatch_task_id: Optional[int] = None
     worker_name: Optional[str] = None
     status: Optional[ReplyConfirmStatus] = None
+
+
+class DispatchReplyMultipleUpdate(DispatchReplyUpdate):
+    id: int

@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session
 from dependencies.db_dependencies import get_db
 from dispatch_data import confirm_data, enum_data, reply_data
 from dispatch_exception import DispatchException
-from dispatch_redis import operate
+from dispatch_redis import redis_operate
 from dispatch_schemas import client_api_schemas, confirm_schemas, task_schemas, ack_method_schemas, reply_schemas
 
 
 async def get_task_by_id(task_id: str = Path(...)):
     table_name = "dispatch_task"
-    return task_schemas.DispatchTask(**operate.read_redis_data(table_name, task_id))
+    return task_schemas.DispatchTask(**redis_operate.read_redis_data(table_name, {task_id})[0])
 
 
 async def check_active(task_table: task_schemas.DispatchTask = Depends(get_task_by_id)):
@@ -34,10 +34,10 @@ async def check_people_limit(task_table: task_schemas.DispatchTask = Depends(get
 
 async def worker_receive_status_id(task_table: task_schemas.DispatchTask = Depends(get_task_by_id)):
     status_id = task_table.status_id
-    pending_status_id = operate.read_redis_data("dispatch_status_by_name", "pending")
+    pending_status_id = redis_operate.read_redis_data("dispatch_status_by_name", {"pending"})[0][0]
     if status_id == pending_status_id:
         # 若status是pending更改為in_progree
-        return operate.read_redis_data("dispatch_status_by_name", "in_progress")
+        return redis_operate.read_redis_data("dispatch_status_by_name", {"in_progress"})[0][0]
     # 其他status則不改status_id
     return None
 
@@ -56,7 +56,7 @@ async def confirm_change_task(client_data: client_api_schemas.DispatcherCreateCo
         -> task_schemas.DispatchTaskUpdate:
     confirm_status = client_data.status.value
     task_status_name = confirm_data.confirm_status_to_task_status_dict[confirm_status]
-    status_id = operate.read_redis_data("dispatch_status_by_name", task_status_name)
+    status_id = redis_operate.read_redis_data("dispatch_status_by_name", {task_status_name})[0][0]
     if confirm_status == "other":
         task_active = None
         task_end_time = None
@@ -85,7 +85,7 @@ class DispatcherConfirm:
 async def get_ack_method_by_task(task_table: task_schemas.DispatchTask = Depends(get_task_by_id)):
     ack_method_id = task_table.ack_method_id
     table_name = "dispatch_ack_method"
-    result = ack_method_schemas.DispatchAckMethod(**operate.read_redis_data(table_name, str(ack_method_id)))
+    result = ack_method_schemas.DispatchAckMethod(**redis_operate.read_redis_data(table_name, {str(ack_method_id)})[0])
     if not result:
         raise DispatchException(status_code=404, detail="not get ack method")
     return result
@@ -95,7 +95,9 @@ async def check_ack_method(
         video: Optional[list[UploadFile]] = None,
         photo: Optional[list[UploadFile]] = None,
         description: str = Form(None),
-        ack_method: ack_method_schemas.DispatchAckMethod = Depends(get_ack_method_by_task)):
+        ack_method: ack_method_schemas.DispatchAckMethod = Depends(get_ack_method_by_task),
+        status: enum_data.ReplyConfirmStatus = Form(...)):
+    reply_status_value = status.value
     is_raise_except = False
     except_msg = "not meet the ack needs( "
     if ack_method.need_text:
@@ -106,23 +108,13 @@ async def check_ack_method(
         if not photo:
             is_raise_except = True
             except_msg += "photo "
-        elif not photo[0].file.read():
-            is_raise_except = True
-            except_msg += "photo "
-            photo = None
     if ack_method.need_video:
         if not video:
             is_raise_except = True
             except_msg += "video "
-        elif not video[0].file.read():
-            is_raise_except = True
-            except_msg += "video "
-            video = None
-    if is_raise_except:
+    if is_raise_except and reply_status_value == "success":
         raise DispatchException(status_code=402, detail=except_msg + ")")
     return {
-        "photo": photo,
-        "video": video,
         "description": description,
     }
 
@@ -138,7 +130,7 @@ async def check_worker_name(worker_name: str = Form(...),
 async def reply_change_task(status: enum_data.ReplyConfirmStatus = Form(...)):
     reply_status = status.value
     task_status_name = reply_data.reply_status_to_task_status_dict[reply_status]
-    status_id = operate.read_redis_data("dispatch_status_by_name", task_status_name)
+    status_id = redis_operate.read_redis_data("dispatch_status_by_name", {task_status_name})[0][0]
     return task_schemas.DispatchTaskUpdate(status_id=status_id)
 
 
@@ -156,6 +148,4 @@ class WorkerReply:
             description=content_data["description"]
         )
         self.task_update_data = task_update_data
-        self.photo = content_data["photo"]
-        self.video = content_data["video"]
         self.db = db
