@@ -1,6 +1,5 @@
 from dispatch_SQL import sql_operate
 from dispatch_SQL.database import SessionLocal
-from dispatch_data import task_data
 from dispatch_redis import redis_operate
 
 
@@ -16,17 +15,11 @@ def initial_reload_data_from_sql(redis_tables: list, sql_model, schemas_model):
     db.close()
 
 
-def reload_redis_task_from_sql(db, task_id: int):
-    result = sql_operate.get_sql_data(db, {task_id}, task_data.sql_model)
-    for table in task_data.redis_tables:
-        redis_operate.write_sql_data_to_redis(
-            table["name"], [result], task_data.main_schemas, table["key"])
-
-
+# reload 只需要更新主表
 def reload_redis_from_sql(
         db, sql_model, main_schemas, redis_tables: list, data_id_set: set):
     sql_data_list: list = sql_operate.get_sql_data(db, data_id_set, sql_model)
-    for table in redis_tables:
+    for table in redis_tables[:1]:
         redis_operate.write_sql_data_to_redis(
             table["name"], sql_data_list, main_schemas, table["key"])
     return sql_data_list

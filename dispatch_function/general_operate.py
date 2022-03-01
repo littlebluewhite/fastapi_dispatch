@@ -56,7 +56,7 @@ class GeneralOperate:
         sql_data_list = sql_operate.update_multiple_sql_data(db, update_list, self.sql_model)
         for table in self.redis_tables:
             redis_operate.write_sql_data_to_redis(
-                table["name"], sql_data_list, self.main_schemas, table["key"]
+                table["name"], sql_data_list, self.main_schemas, table["key"], update_list
             )
         reload_function.reload_redis_table(
             db, self.reload_related_redis_tables, sql_data_list, original_ref_id_dict)

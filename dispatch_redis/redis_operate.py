@@ -12,16 +12,32 @@ def clean_redis_by_name(table_name):
             print(f"clean redis table: {table_name}")
 
 
-def write_sql_data_to_redis(table_name: str, sql_data: list, schemas_model,
-                            key: str = "id") -> list:
+def write_sql_data_to_redis(table_name: str, sql_data_list: list, schemas_model,
+                            key: str = "id", update_list: list = None) -> list:
+    """
+
+    :param table_name:
+    :param sql_data_list:
+    :param schemas_model:
+    :param key:
+    :param update_list: update sql table可以加此參數，減少對redis的訪問，不加也可以
+    :return:
+    """
+    update_dict = dict()
+    if update_list is None:
+        update_list = list()
+    for update_data in update_list:
+        update_dict[update_data.id] = update_data
     result = list()
-    for datum in sql_data:
-        row = schemas_model(**jsonable_encoder(datum, custom_encoder={
+    for sql_data in sql_data_list:
+        row = schemas_model(**jsonable_encoder(sql_data, custom_encoder={
             bytes: lambda v: base64.b64encode(v).decode('utf-8')}))
+        # 寫入主表
         if key == "id":
             value = row.json()
             redisDB.hset(table_name, getattr(row, key), value)
-        else:
+        # 寫入附表(index table)
+        elif not update_list or getattr(update_dict.get(row.id, None), key, None) is not None:
             # sql type 是 json list的情況
             if isinstance(getattr(row, key), list):
                 for item in getattr(row, key):
@@ -67,7 +83,7 @@ def delete_redis_data(table_name: str, data_list: list, schemas_model,
     :param data_list:
     :param schemas_model:
     :param key:
-    :param update_list: 如果是因為update sql table需要的刪除redis，需要加此參數
+    :param update_list: 如果是因為update sql table需要刪除redis，要加此參數
     :return:
     """
     update_dict = dict()
@@ -77,8 +93,10 @@ def delete_redis_data(table_name: str, data_list: list, schemas_model,
         update_dict[update_data.id] = update_data
     for data in data_list:
         row = schemas_model(**jsonable_encoder(data))
+        # 刪除主表
         if key == "id":
             redisDB.hdel(table_name, getattr(row, key))
+        # 刪除附表(index table)
         elif not update_list or getattr(update_dict.get(row.id, None), key, None) is not None:
             # sql type 是 json list的情況
             if isinstance(getattr(row, key), list):
